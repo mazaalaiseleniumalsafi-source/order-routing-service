@@ -1,0 +1,42 @@
+name: Production Readiness Gate
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: read
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout @v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Start service in bg
+        run: |
+          NODE_ENV=production PORT=3000 node server.js &
+          sleep 2
+      - name: Run production readiness smoke test
+        run: |
+          HEADERS=$(curl -s -I "http://localhost:3000/readyz")
+          echo "$HEADERS"
+          echo "$HEADERS" | grep -qi "HTTP/1.1 200 OK"
+          echo "$HEADERS" | grep -qi "X-Content-Type-Options: nosniff"
+          echo "$HEADERS" | grep -qi "Strict-Transport-Security: max-age=31536000; includeSubDomains"
+
+          BODY=$(curl -s "http://localhost:3000/readyz")
+          echo "$BODY"
+          echo "$BODY" | grep -q '"status":"ready"'
+          echo "$BODY" | grep -q '"environment":"production"'
+
+          echo "$BODY" > prod-readiness-report.json
+      - name: Upload production readiness report
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-readiness-report
+          path: prod-readiness-report.json
